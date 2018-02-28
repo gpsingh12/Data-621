@@ -1,0 +1,379 @@
+---
+title: "Homework 1"
+author: "Gurpreet Singh"
+date: "February 27, 2018"
+output: html_document
+---
+
+
+## Homework 1 - MoneyBall
+
+
+#### Libraries
+
+```{r}
+suppressWarnings(library(data.table))
+suppressWarnings(library(knitr))
+suppressWarnings(library(pastecs))
+suppressWarnings(library(psych))
+suppressWarnings(library(Hmisc))
+suppressWarnings(library(reshape))
+suppressWarnings(library(corrplot))
+suppressWarnings(library(MASS))
+suppressWarnings(library(dplyr))
+suppressWarnings(library(ggplot2))
+```
+
+### Data Exploration
+
+```{r}
+train <-fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/data/moneyball-training-data.csv")
+test <-fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/data/moneyball-evaluation-data.csv")
+ref <- fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/data/ref_variables.csv")
+```
+
+##### a. Data Description
+
+
+The dataset consists of 17 variables and 2276 rows. Column INDEX is assigning a record number to each entry in the dataset and will be excluded from the analysis. The structure of data is integer, we will proceed with the analysis with the structure unchanged.The reference file describes the variables and their impact on the wins.
+
+```{r}
+
+dim(train)
+str(train)
+## integer values
+kable(head(train))
+kable(ref)
+```
+
+
+Variable TARGET_WINS is our dependent variable and remaining 15 variables are the independent variables that will be analyzed for prediction to use in our models.
+
+```{r}
+miss_names <- setdiff(colnames(train),colnames(test))
+
+train <- train[,c(2:17)]
+test <- test[,c(2:16)]
+
+```
+
+
+
+
+##### b. Data Summary/Statistics
+
+The next step in the process is to summarize our data. The summary points for all 16 variables are described below.
+
+```{r}
+## summary of the data set
+stat.desc(train)
+psych::describe(train)
+
+
+```
+
+
+```{r}
+train <- as.data.frame((train))
+
+par(mfrow=c(3, 3))
+colnames <- dimnames(train)[[2]]
+
+  for(col in 2:ncol(train)) {
+
+    d <- density(na.omit(train[,col]))
+   #d <- qqnorm(na.omit(train[,col]))
+    plot(d, type="n", main=colnames[col])
+    polygon(d, col="red", border="gray")
+  }
+
+
+
+
+```
+
+
+
+
+
+##### c. Data Outliers 
+ We will detect the outliers using box-plot for the variables. From the box-plot for all the variables, we see that variables TEAM_PITCHING_H and TEAM_PITCHING_SO contains the outliers. We will handle the outliers in the data preparation section.
+ 
+```{r}
+
+m1 <- melt(as.data.frame(train))
+
+ggplot(m1,aes(x = variable,y = value)) + facet_wrap(~variable) + geom_boxplot()
+
+```
+
+
+#### d. Missing Values (NA's)
+Defining the summary of data, we included the number of NA's in all the variables. We will create data frame for all tbe NA's in the dataset. The variables with missing values are listed.
+
+```{r}
+## Checking :for NA's
+
+train_na<- data.frame(colSums(is.na(train)))
+train_na
+
+test_na<- data.frame(colSums(is.na(test)))
+test_na
+
+```
+
+
+
+#### e. Collinearity 
+
+Based on the analysis, two variables TEAM_BATTING_HR and TEAM_PITCHING_HR were collinear.
+
+```{r}
+
+correl_train <- as.data.frame(round(cor(train, use = "pair"), 2))
+coll <- which(correl_train> 0.8 & correl_train<1, arr.ind=TRUE)
+coll
+
+# cor_matrix<-cor(train[,1],train[,2:16])
+# na.omit(cor_matrix)
+
+
+```
+
+The results from Data Exploration sections will be used for next step in the analysis, preparing our data for models.
+
+
+##2. Data Preparation
+
+####a. Handle Outliers in the dataset
+
+```{r}
+replaceOutliers = function(x) { 
+
+    quantiles <- quantile( x, c(0.5,.95 ) )
+    x[ x < quantiles[1] ] <- quantiles[1]
+   
+    x[ x > quantiles[2] ] <- quantiles[2]
+    return(x)
+}
+   
+train$TEAM_PITCHING_H <- replaceOutliers(train$TEAM_PITCHING_H)
+test$TEAM_PITCHING_H <- replaceOutliers(test$TEAM_PITCHING_H)
+```
+
+
+
+
+####b. Handling NA's
+1. The variable TEAM_BATTING_HBP has 2085 NA's (almost 92% of the data). Including the variable in the analysis might not be the best approach. In addition, imputation of the variables with large percentage of NA's might not be an effective way to handle NA's. We will drop the variable from analysis.
+The variable TEAM_BASERUN_CS has 34% missing values, we will remove the varible from the analusis. The remaining varibles with missing values will be treated by median imputation.
+
+
+```{r}
+train <- train[,-c(9:10)]
+test <- test[,-c(8:9)]
+
+train$TEAM_PITCHING_SO[is.na(train$TEAM_PITCHING_SO)] <- median(train$TEAM_PITCHING_SO, na.rm = TRUE)
+train$TEAM_BATTING_SO[is.na(train$TEAM_BATTING_SO)] <- median(train$TEAM_BATTING_SO, na.rm = TRUE)
+train$TEAM_BASERUN_SB[is.na(train$TEAM_BASERUN_SB)] <- median(train$TEAM_BASERUN_SB, na.rm = TRUE)
+train$TEAM_FIELDING_DP[is.na(train$TEAM_FIELDING_DP)] <- median(train$TEAM_FIELDING_DP, na.rm = TRUE)
+
+
+
+
+test$TEAM_PITCHING_SO[is.na(test$TEAM_PITCHING_SO)] <- median(test$TEAM_PITCHING_SO, na.rm = TRUE)
+test$TEAM_BATTING_SO[is.na(test$TEAM_BATTING_SO)] <- median(test$TEAM_BATTING_SO, na.rm = TRUE)
+test$TEAM_BASERUN_SB[is.na(test$TEAM_BASERUN_SB)] <- median(test$TEAM_BASERUN_SB, na.rm = TRUE)
+test$TEAM_FIELDING_DP[is.na(test$TEAM_FIELDING_DP)] <- median(test$TEAM_FIELDING_DP, na.rm = TRUE)
+```
+
+
+####c. Collinearity
+The variables TEAM_BATTING_HR and TEAM_PITCHING_HR are collinear with strong correlation of 97%. We will exclude the variable TEAM_PITCHING_HR to handle collinearity.
+
+Data Preparation section leads us in the removal of three variables from analysis. We will move forward with remaining variables for building the models.
+
+####d. Transforming the variables
+A closer look at the density plots form data exploration section reveals that the variables TEAM_BATTING_HR, TEAM_PITCHING_HR, TEAM_BATTING_SO and TEAM_PITCHING_SO can not be assumed normal.
+Variable TEAM_PITCHING_HR was removed due to multicollinearity. We will transform the remaining three variables for normality assumption. The variables will be transformed using log transformations.
+
+```{r}
+train_t <- train
+train_t$TEAM_BATTING_HR_tr <- log(train_t$TEAM_BATTING_HR +1)
+train_t$TEAM_BATTING_SO_tr <- log(train_t$TEAM_BATTING_SO +1)
+train_t$TEAM_PITCHING_SO_tr <- log(train_t$TEAM_PITCHING_SO +1)
+
+
+test_t<- test
+test_t$TEAM_BATTING_HR_tr <- log(test_t$TEAM_BATTING_HR +1)
+test_t$TEAM_BATTING_SO_tr <- log(test_t$TEAM_BATTING_SO +1)
+test_t$TEAM_PITCHING_SO_tr <- log(test_t$TEAM_PITCHING_SO +1)
+
+```
+
+
+
+
+###3. Building the Models
+
+
+
+
+
+
+
+
+#### Model1
+
+Backward Elimination
+
+```{r}
+model1 <- lm(TARGET_WINS~.,data=train)
+summary(model1)
+
+
+model1 <-update(model1, .~. -TEAM_PITCHING_HR,data=train)
+summary(model1)
+
+
+model1 <-update(model1, .~. -TEAM_BATTING_BB,data=train)
+summary(model1)
+
+stepb<- stepAIC(model1,direction="backward", trace=F)
+stepb$anova
+
+```
+
+
+```{r}
+par(mfrow=c(2,2 ))
+plot(model1)
+```
+
+#### Model 2
+```{r}
+
+
+
+model2 <- step(lm(TARGET_WINS~ 1, data=train), direction='forward', scope=~ TEAM_BATTING_H + TEAM_FIELDING_E + TEAM_BASERUN_SB + TEAM_FIELDING_DP + TEAM_PITCHING_HR + TEAM_BATTING_3B + 
+    TEAM_BATTING_BB + TEAM_BATTING_2B + TEAM_PITCHING_SO + TEAM_BATTING_SO + 
+    TEAM_PITCHING_H + TEAM_BATTING_HR)
+summary(model2)
+stepf<- stepAIC(model2,direction="forward", trace=F)
+stepf$anova
+
+```
+
+
+
+```{r}
+
+par(mfrow=c(2,2 ))
+plot(model2)
+```
+
+
+### Model 3
+The correlation matrix will be used to select the correlation of the independent variables with dependent variables to select the variables for our model. The transformed variables will also be included.
+
+```{r}
+cor(train_t[,1], train_t[,2:17])
+```
+
+Based on the correlation matrix, we will pick TEAM_BATTING_H, TEAM_BATTING_2B,TEAM_BATTING_HR_tr as our independent variables for prediction.
+
+
+
+
+```{r}
+model3 <- lm(TARGET_WINS~TEAM_BATTING_H+TEAM_BATTING_2B+TEAM_BATTING_HR_tr,data=train_t)
+summary(model3)
+
+
+```
+
+
+
+```{r}
+#ggplot(model3, aes(x = .fitted, y = .resid)) + geom_point() +geom_hline(yintercept=0)
+par(mfrow=c(2,2 ))
+plot(model3)
+```
+
+
+
+###4. Model selection
+
+BoxCox
+```{r}
+# m<- lm(TARGET_WINS~.,data=train)
+# # 
+# b<- MASS::boxcox(m)
+# lam <- b$x[which(b$y==max(b$y))]
+# lam 
+# # 
+# model4 <- lm((TARGET_WINS)^(1.25) ~.,data=train)
+# summary(model4)
+```
+
+####4. Model selection:
+
+AIC value:
+```{r}
+#AIC(model1,model2,model3,model4)
+```
+
+Adj-Rsq
+
+```{r}
+arsq_m1 <-summary(model1)$adj.r.squared
+arsq_m2 <-summary(model2)$adj.r.squared
+arsq_m3 <-summary(model3)$adj.r.squared
+#arsq_m4 <-summary(model4)$adj.r.squared
+#comp<- c(arsq_m1,arsq_m2,arsq_m3,arsq_m4)
+#kable(comp)
+```
+```{r}
+rse_m1 <- 13.08
+rse_m2 <- 13.07
+rse_m3 <- 14.17
+#rse_m4 <- 41.8
+
+
+```
+
+
+
+Residual-Plot
+```{r}
+
+par(mfrow=c(4, 4))
+plot(model1)
+plot(model2)
+plot(model3)
+#plot(model4)
+
+
+
+```
+
+
+###5. Test Model
+
+```{r}
+predicted <- predict(model1,data=test)
+test$TARGET_WINS <- predicted
+
+
+```
+
+#### Reference
+
+
+
+
+##### https://www.statmethods.net/stats/descriptives.html
+##### https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4842399/
+
+##### http://flowingdata.com/2012/05/15/how-to-visualize-and-compare-distributions/
+##### Zeros https://stats.stackexchange.com/questions/1444/how-should-i-transform-non-negative-data-including-zeros
