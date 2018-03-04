@@ -6,6 +6,7 @@ output: html_document
 ---
 
 
+
 ## Homework 1 - MoneyBall
 
 
@@ -22,6 +23,7 @@ suppressWarnings(library(corrplot))
 suppressWarnings(library(MASS))
 suppressWarnings(library(dplyr))
 suppressWarnings(library(ggplot2))
+suppressWarnings(library(geoR))
 ```
 
 ### Data Exploration
@@ -53,7 +55,7 @@ Variable TARGET_WINS is our dependent variable and remaining 15 variables are th
 miss_names <- setdiff(colnames(train),colnames(test))
 
 train <- train[,c(2:17)]
-test <- test[,c(2:16)]
+#test <- test[,c(2:16)]
 
 ```
 
@@ -171,7 +173,7 @@ The variable TEAM_BASERUN_CS has 34% missing values, we will remove the varible 
 
 ```{r}
 train <- train[,-c(9:10)]
-test <- test[,-c(8:9)]
+test <- test[,-c(9:10)]
 
 train$TEAM_PITCHING_SO[is.na(train$TEAM_PITCHING_SO)] <- median(train$TEAM_PITCHING_SO, na.rm = TRUE)
 train$TEAM_BATTING_SO[is.na(train$TEAM_BATTING_SO)] <- median(train$TEAM_BATTING_SO, na.rm = TRUE)
@@ -210,6 +212,11 @@ test_t$TEAM_BATTING_SO_tr <- log(test_t$TEAM_BATTING_SO +1)
 test_t$TEAM_PITCHING_SO_tr <- log(test_t$TEAM_PITCHING_SO +1)
 
 ```
+
+
+
+
+
 
 
 
@@ -255,23 +262,17 @@ plot(model1)
 
 
 
+
 model2 <- step(lm(TARGET_WINS~ 1, data=train), direction='forward', scope=~ TEAM_BATTING_H + TEAM_FIELDING_E + TEAM_BASERUN_SB + TEAM_FIELDING_DP + TEAM_PITCHING_HR + TEAM_BATTING_3B + 
     TEAM_BATTING_BB + TEAM_BATTING_2B + TEAM_PITCHING_SO + TEAM_BATTING_SO + 
     TEAM_PITCHING_H + TEAM_BATTING_HR)
 summary(model2)
-stepf<- stepAIC(model2,direction="forward", trace=F)
-stepf$anova
 
 ```
 
 
 
-```{r}
-
-par(mfrow=c(2,2 ))
-plot(model2)
-```
-
+`
 
 ### Model 3
 The correlation matrix will be used to select the correlation of the independent variables with dependent variables to select the variables for our model. The transformed variables will also be included.
@@ -304,19 +305,9 @@ plot(model3)
 
 ###4. Model selection
 
-BoxCox
-```{r}
-# m<- lm(TARGET_WINS~.,data=train)
-# # 
-# b<- MASS::boxcox(m)
-# lam <- b$x[which(b$y==max(b$y))]
-# lam 
-# # 
-# model4 <- lm((TARGET_WINS)^(1.25) ~.,data=train)
-# summary(model4)
-```
 
-####4. Model selection:
+
+
 
 AIC value:
 ```{r}
@@ -329,10 +320,9 @@ Adj-Rsq
 arsq_m1 <-summary(model1)$adj.r.squared
 arsq_m2 <-summary(model2)$adj.r.squared
 arsq_m3 <-summary(model3)$adj.r.squared
-#arsq_m4 <-summary(model4)$adj.r.squared
-#comp<- c(arsq_m1,arsq_m2,arsq_m3,arsq_m4)
-#kable(comp)
+
 ```
+
 ```{r}
 rse_m1 <- 13.08
 rse_m2 <- 13.07
@@ -351,7 +341,7 @@ par(mfrow=c(4, 4))
 plot(model1)
 plot(model2)
 plot(model3)
-#plot(model4)
+
 
 
 
@@ -362,8 +352,10 @@ plot(model3)
 
 ```{r}
 predicted <- predict(model1,data=test)
-test$TARGET_WINS <- predicted
+test$TARGET_WINS <- round(predicted)
 
+results <- test[,c(test$INDEX, test$TARGET_WINS)]
+head(results)
 
 ```
 
