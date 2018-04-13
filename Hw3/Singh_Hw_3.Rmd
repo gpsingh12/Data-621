@@ -1,0 +1,313 @@
+---
+title: "Homework 3"
+author: "Gurpreet Singh"
+date: "April 1, 2018"
+output: html_document
+---
+
+
+#### Crime Prediction 
+
+```{r}
+library(data.table)
+library(psych)
+library(knitr)
+library(reshape)
+library(ggplot2)
+library(caret)
+library(pROC)
+```
+
+
+
+##### Data Exploration
+
+```{r}
+train <- fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/Hw3/crime-training-data_modified.csv")
+test <-  fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/Hw3/crime-evaluation-data_modified.csv")
+var_desc <- fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/Hw3/crime_data_variables.csv")
+```
+
+
+####Explore Dataset 
+
+```{r}
+dim(train)
+str(train)
+kable(var_desc)
+kable(head(train))
+```
+
+
+#### Summary Statistics:
+
+```{r}
+psych::describe(train)
+
+```
+
+
+#### Missing Values
+```{r}
+colSums(is.na(train))
+```
+
+
+##### Detecting Outliers:
+
+```{r}
+ 
+m1 <- melt(as.data.frame(train))
+
+ggplot(m1,aes(x = variable,y = value)) + facet_wrap(~variable,scales = "free",ncol =4) + geom_boxplot()
+
+
+ggplot(m1, mapping = aes(x = value)) + geom_histogram(bins = 20) + facet_wrap(~variable, scales = 'free')+ylim(c(0,100))
+
+
+
+
+
+out_zn = boxplot(train$zn)$out
+which(train$zn %in% out_zn)
+
+out_rm = boxplot(train$rm)$out
+  
+out_dis =  boxplot(train$dis)$out
+  
+out_lstat = boxplot(train$lstat)$out
+  
+out_medv = boxplot(train$medv)$out
+
+```
+#### correlation
+
+```{r}
+library(PerformanceAnalytics)
+chart.Correlation(train[1:13])
+```
+
+```{r}
+library(corrplot)
+x <- cor(train[1:13])
+corrplot(x,  method="number")
+```
+
+
+#### Data Preparation:
+
+
+#### fix outliers
+```{r}
+replaceOutliers = function(x) { 
+
+    quantiles <- quantile( x, c(0.5,.95 ) )
+    x[ x < quantiles[1] ] <- quantiles[1]
+   
+    x[ x > quantiles[2] ] <- quantiles[2]
+    return(x)
+}
+
+for (i in names(t)){
+i <- replaceOutliers(get(i))
+}
+train$zn <- replaceOutliers(train$zn)
+train$rm <- replaceOutliers(train$rm)
+train$lstat <- replaceOutliers(train$lstat)
+train$dis <- replaceOutliers(train$dis)
+train$medv <- replaceOutliers(train$medv)
+
+boxplot(train$zn)
+
+```
+
+#### Transform Variables :
+
+we will create two new variables for ptratio and rm. We will use median split to categorize the variables into high  and low values. The values above median will be flagged as 1 (high) and values below median will be flagged as 0 (low). The reasoning behind this is that due to low correlation of these variables with target, we think it is a better approach to include the important information only for these variables rather than the model testing significance of all the values. In addition it might be a better to remove the original variables with categorical to test another model.
+The dichtomizing approach sometimes can impact your results because losing data can lead to losing information. We are selecting variables with weak correlation to lower this impact.
+
+https://www.theanalysisfactor.com/3-situations-when-it-makes-sense-to-categorize-a-continuous-predictor-in-a-regression-model/
+
+
+```{r}
+train$ptratio_bkt <- ifelse(train$ptratio >= median(train$ptratio,na.rm=T),1,0)
+train$rm_bkt <- ifelse(train$rm >= median(train$rm,na.rm=T),1,0)
+```
+
+Logistic regression requires little or no multicollinearity among the independent variables.We will select variables. Based on multicollinearity assumption, we selected variable tax strongly correlated with variables indus and rad. We will create a new variable by creating bucket by dichotmizing using median split.
+
+```{r}
+train$tax_bkt <- ifelse(train$tax >= median(train$tax,na.rm=T),1,0)
+```
+
+
+
+Normality assumption is not required for logistic models. There are no missing values in the dataset. Outliers have been treated by using winsorization.
+
+
+#### Build Models:
+
+Model1:
+Full Model- without new variables
+```{r}
+train1<- train[,-c(14:16)]
+model1 <- glm(target ~.,family=binomial(link='logit'),data=train1)
+summary(model1)
+```
+
+
+
+Model2:
+
+
+```{r}
+train2<- train[,-c(5,9:10)]
+model2 <- glm(target ~.,family=binomial(link='logit'),data=train2)
+summary(model2)
+
+model2 <- update(model2, .~. -chas,data=train2)
+summary(model2)
+
+model2 <- update(model2, .~. -rm_bkt,data=train2)
+summary(model2)
+
+model2 <- update(model2, .~. -indus,data=train2)
+summary(model2)
+
+model2 <- update(model2, .~. -lstat,data=train2)
+summary(model2)
+
+
+model2 <- update(model2, .~. -ptratio_bkt,data=train2)
+summary(model2)
+```
+
+
+
+Model3:
+```{r}
+train3<- train[,-c(5,9:10)]
+model3 <- step(glm(target~ 1, data=train3), direction='forward', scope=~ zn+indus+chas+nox+age+dis+age+dis+rad+lstat+medv+
+                 ptratio_bkt+rm_bkt+tax_bkt)
+summary(model3)
+```
+
+
+
+#### Model Selection:
+```{r}
+logLik(model1)
+coefficients(model1)
+predict1 <- predict(model1, type = 'response')
+pred_1<- ifelse(predict1>0.5,1,0)
+cm_model1 <- confusionMatrix(pred_1, train$target, positive ="1")
+
+
+
+logLik(model2)
+coefficients(model2)
+pred_2 <- predict(model2, type = 'response')
+predict2<- ifelse(pred_2>0.5,1,0)
+cm_model2 <- confusionMatrix(predict2, train$target, positive ="1")
+
+
+
+logLik(model3)
+coefficients(model3)
+pred_3 <- predict(model3, type = 'response')
+predict3<- ifelse(pred_3>0.5,1,0)
+cm_model3 <- confusionMatrix(predict3, train$target, positive ="1")
+
+
+
+rc_m1 <- roc(train$target~ predict1)
+auc(rc_m1)
+plot(rc_m1)
+
+
+rc_m2 <- roc(train$target~ predict2)
+auc(rc_m2)
+plot(rc_m2)
+
+
+rc_m3 <- roc(train$target~ predict3)
+auc(rc_m3)
+plot(rc_m3)
+
+
+
+
+### 
+# par_m1 <- data.frame(rbind.fill(cm_model1$byClass,cm_model1$overall))
+par_m11 <- data.frame((cm_model1$byClass))
+par_m12 <- data.frame((cm_model1$overall))
+names(par_m11)<- c("parameters_model1")
+names(par_m12)<- c("parameters_model1")
+par_m1<- rbind(par_m11, par_m12)
+
+
+par_m21 <- data.frame((cm_model2$byClass))
+par_m22 <- data.frame((cm_model2$overall))
+names(par_m21)<- c("parameters_model2")
+names(par_m22)<- c("parameters_model2")
+par_m2<- rbind(par_m21, par_m22)
+
+
+
+par_m31 <- data.frame((cm_model3$byClass))
+par_m32 <- data.frame((cm_model3$overall))
+names(par_m31)<- c("parameters_model3")
+names(par_m32)<- c("parameters_model3")
+par_m3<- rbind(par_m31, par_m32)
+
+
+
+comp <- cbind(par_m1,par_m2,par_m3)
+
+comp
+
+
+AIC(model1)
+AIC(model2)
+AIC(model3)
+
+BIC(model1)
+BIC(model2)
+BIC(model3)
+
+aic_df <- data.frame(AIC(model1), AIC(model2), AIC(model3))
+kable(aic_df)
+bic_df <- data.frame(BIC(model1), BIC(model2), BIC(model3))
+
+kable(bic_df)
+```
+```{r}
+colSums(is.na(test))
+
+test$zn <- replaceOutliers(test$zn)
+test$rm <- replaceOutliers(test$rm)
+test$lstat <- replaceOutliers(test$lstat)
+test$dis <- replaceOutliers(test$dis)
+test$medv <- replaceOutliers(test$medv)
+
+test$ptratio_bkt <- ifelse(test$ptratio >= median(test$ptratio,na.rm=T),1,0)
+test$rm_bkt <- ifelse(test$rm >= median(test$rm,na.rm=T),1,0)
+test$tax_bkt <- ifelse(test$tax >= median(test$tax,na.rm=T),1,0)
+
+pred_df<-predict(model2,type="response", newdata=test)
+pred_df <- ifelse(pred_df > 0.5, 1, 0)
+
+```
+
+
+
+
+
+
+#### Refrence:
+http://www.statisticssolutions.com/assumptions-of-logistic-regression/
+https://frnsys.com/ai_notes/machine_learning/model_selection.html
+https://www.analyticsvidhya.com/blog/2016/02/7-important-model-evaluation-error-metrics/
+http://ethen8181.github.io/machine-learning/unbalanced/unbalanced.html
+
+
