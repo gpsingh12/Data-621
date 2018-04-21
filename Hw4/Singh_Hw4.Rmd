@@ -1,0 +1,592 @@
+---
+title: "Homework 4"
+author: "Gurpreet Singh"
+date: "April 15, 2018"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r}
+library(data.table)
+library(mice)
+library(knitr)
+library(purrr)
+library(ggplot2)
+library(reshape)
+library(DataExplorer)
+library(statar)
+library(corrplot)
+library(psych)
+library(caret)
+library(pROC)
+library(PerformanceAnalytics)
+```
+
+
+
+#### Data Exploration:
+```{r}
+train <- fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/Hw4/insurance_training_data.csv")
+train <- train[,-c(1)]
+var <- fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/Hw4/variables_ins_data.csv")
+```
+
+
+```{r}
+str(train)
+dim(train)
+kable(head(train))
+
+#psych::describe(train)
+
+```
+
+```{r}
+table(train$PARENT1,useNA = 'ifany')
+table(train$MSTATUS, useNA = 'ifany')
+table(train$SEX, useNA = 'ifany')
+table(train$EDUCATION, useNA = 'ifany')
+table(train$JOB,useNA = 'ifany')
+table(train$CAR_TYPE,useNA = 'ifany')
+table(train$CAR_USE,useNA = 'ifany')
+table(train$RED_CAR,useNA = 'ifany')
+table(train$REVOKED,useNA = 'ifany')
+table(train$URBANICITY,useNA = 'ifany')
+
+
+train$INCOME <- as.numeric(gsub('[$,]', '', train$INCOME))
+train$HOME_VAL <- as.numeric(gsub('[$,]', '', train$HOME_VAL))
+train$BLUEBOOK <- as.numeric(gsub('[$,]', '', train$BLUEBOOK))
+train$OLDCLAIM <- as.numeric(gsub('[$,]', '', train$OLDCLAIM))
+
+
+
+
+
+miss <- data.frame(map_df(train, function(x) sum(is.na(x))))
+miss <- miss[!(rowSums(miss) == 0), !(colSums(miss) == 0)]
+miss
+
+miss_plot <- plot_missing(train)
+miss_plot
+
+##https://stackoverflow.com/questions/8317231/elegant-way-to-report-missing-values-in-a-data-frame
+
+
+
+
+train_out <- train[,-c(1:3,9,11:14,16,19,20,23,26)]
+m1 <- melt(as.data.frame(train_out))
+
+ggplot(m1,aes(x = variable,y = value)) + facet_wrap(~variable,scales = "free",ncol =4) + geom_boxplot()
+
+
+p <-ggplot(m1, aes(x=variable, y=value)) + geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)
+p + coord_flip()
+ggplot(m1, mapping = aes(x = value)) + geom_histogram(bins = 20) + facet_wrap(~variable, scales = 'free')
+
+```
+
+
+
+
+
+
+
+
+
+
+#### Data Preparation
+
+
+Outlier Treatment
+
+
+```{r}
+#winsorize(train)
+
+replace_outliers <- function(x) {
+qnt <- quantile(x, probs=c(.25, .75), na.rm = T)
+caps <- quantile(x, probs=c(.05, .95), na.rm = T)
+H <- 1.5 * IQR(x, na.rm = T)
+x[x < (qnt[1] - H)] <- caps[1]
+x[x > (qnt[2] + H)] <- caps[2]
+ 
+return(x)
+}
+
+train$BLUEBOOK<-replace_outliers(train$BLUEBOOK)
+train$OLDCLAIM<-replace_outliers(train$OLDCLAIM)
+train$INCOME<-replace_outliers(train$INCOME)
+
+
+
+
+train_out_2 <- train[,c(7,16,20,26,27,28)]
+m2 <- melt(as.data.frame(train_out_2))
+p <-ggplot(m2, aes(x=variable, y=value)) + geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)
+p + coord_flip()
+
+```
+
+
+
+
+Missing Values:
+
+In data exploration section, we found five variabes with missing values.The percentage of missing values is 
+5% - 6% of the original records. We will not remove these variables from analysis. Missing values will be treated for analysis rather than removing the variables from analysis.
+Structure of variables age, yoj, income, home value and car age is numeric or integer rather than character. Using median imputation is a better practise in that case.
+
+```{r}
+
+train$AGE[is.na(train$AGE)] <- median(train$AGE, na.rm = TRUE)
+train$YOJ[is.na(train$YOJ)] <- median(train$YOJ, na.rm = TRUE)
+train$INCOME[is.na(train$INCOME)] <- median(train$INCOME, na.rm = TRUE)
+train$HOME_VAL[is.na(train$HOME_VAL)] <- median(train$HOME_VAL, na.rm = TRUE)
+train$CAR_AGE[is.na(train$CAR_AGE)] <- median(train$CAR_AGE, na.rm = TRUE)
+```
+
+
+
+
+New Variables
+```{r}
+
+
+train$PARENT1<- ifelse(train$PARENT1=="Yes",1,0)
+
+train$MSTATUS<- ifelse(train$MSTATUS=="Yes",1,0)
+
+train$SEX_m<- ifelse(train$SEX=="M",1,0)
+train$SEX_f<- ifelse(train$SEX=="z_F",1,0)
+train <- train[,-c("SEX")]
+
+train$EDU_lesshs<- ifelse(train$EDUCATION=="<High School",1,0)
+train$EDU_hs<- ifelse(train$EDUCATION=="z_High School",1,0)
+train$EDU_bach<- ifelse(train$EDUCATION=="Bachelors",1,0)
+train$EDU_ms<- ifelse(train$EDUCATION=="Masters",1,0)
+train$EDU_phd<- ifelse(train$EDUCATION=="PhD",1,0)
+
+train <- train[,-c("EDUCATION")]
+
+train$JOB_dl<- ifelse(train$JOB=="Doctor"|train$JOB=="Lawyer",1,0)
+train$JOB_prof<- ifelse(train$JOB=="Clerical"|train$JOB=="Manager"|train$JOB=="Professional",1,0)
+train$JOB_bc<- ifelse(train$JOB=="z_Blue Collar",1,0)
+train$JOB_st<- ifelse(train$JOB=="Student",1,0)
+train$JOB_hm<- ifelse(train$JOB=="Home Maker",1,0)
+train$JOB_nj<- ifelse(train$JOB==""|train$JOB == " ",1,0)
+
+train <- train[,-c("JOB")]
+
+
+
+train$CAR_USE_comm <- ifelse(train$CAR_USE=="Commercial",1,0)
+train$CAR_USE_pvt<- ifelse(train$CAR_USE=="Private",1,0)
+train <- train[,-c("CAR_USE")]
+
+train$CAR_TYPE_suv <- ifelse(train$CAR_TYPE=="z_SUV",1,0)
+train$CAR_TYPE_mvv <- ifelse(train$CAR_TYPE=="Minivan"|train$CAR_TYPE=="Van",1,0)
+train$CAR_TYPE_sc <- ifelse(train$CAR_TYPE=="Sports Car",1,0)
+train$CAR_TYPE_pt <- ifelse(train$CAR_TYPE=="Panel Truck",1,0)
+train$CAR_TYPE_pu <- ifelse(train$CAR_TYPE=="Pickup",1,0)
+train <- train[,-c("CAR_TYPE")]
+
+train$RED_CAR<- ifelse(train$RED_CAR=="yes",1,0)
+
+
+
+
+train$REVOKED<- ifelse(train$REVOKED=="Yes",1,0)
+
+
+train$URBANICITY<- ifelse(train$URBANICITY=="Highly Urban/ Urban",1,0)
+
+
+
+train <- train[,-c("SEX_f", "EDU_phd", "CAR_USE_pvt", "JOB_nj","CAR_TYPE_pu")]
+```
+
+
+Multicollinearity
+
+
+Variables Income and home value shows collinearity. The correlation between the variables is not strong enough, we will retain the variables for analysis. For income variable we will create a new variable by transforming the variable using quantiles.
+
+```{r}
+library(corrplot)
+x <- cor(train)
+corrplot(x,  method="number")
+
+cm <- data.frame(round(cor(train),2))
+cm_high <- cm[cm]
+```
+
+Bucket Variables
+
+
+#### Build Models
+
+Prediction for TARGET_FLAG
+Model1
+
+Full model: original dataset with all the variables included in the dataset except newly generated transformed variables.
+
+```{r}
+
+train1<- train[,-c(2)]
+model1 <- glm( TARGET_FLAG~.,family=binomial(link='logit'),data=train1)
+summary(model1)
+
+
+
+coefficients(model1)
+predict1 <- predict(model1, type = 'response')
+pred_1<- ifelse(predict1>0.5,1,0)
+cm_model1 <- confusionMatrix(pred_1, train1$TARGET_FLAG, positive ="1")
+
+par_m11 <- data.frame((cm_model1$byClass))
+par_m12 <- data.frame((cm_model1$overall))
+names(par_m11)<- c("parameters_model1")
+names(par_m12)<- c("parameters_model1")
+par_m1<- rbind(par_m11, par_m12)
+
+kable(par_m1)
+
+AIC(model1)
+
+BIC(model1)
+
+
+
+rc_m1 <- roc(train$TARGET_FLAG~ predict1)
+auc(rc_m1)
+plot(rc_m1)
+
+
+```
+
+
+Model 2
+Backward Selection : Model 2 is an updated version of model 1 using backward elimination to remove insignificant variables.
+
+```{r}
+model2 <-  step(model1, direction="backward")
+summary(model2)
+
+
+
+
+coefficients(model2)
+predict2 <- predict(model2, type = 'response')
+pred_2<- ifelse(predict2>0.5,1,0)
+cm_model2 <- confusionMatrix(pred_2, train1$TARGET_FLAG, positive ="1")
+
+par_m21 <- data.frame((cm_model2$byClass))
+par_m22 <- data.frame((cm_model2$overall))
+names(par_m21)<- c("parameters_model2")
+names(par_m22)<- c("parameters_model2")
+par_m2<- rbind(par_m21, par_m22)
+
+kable(par_m2)
+
+AIC(model2)
+
+BIC(model2)
+
+
+
+rc_m2 <- roc(train$TARGET_FLAG~ predict2)
+auc(rc_m2)
+plot(rc_m2)
+
+
+```
+
+
+
+Model 3 
+
+Forward Selection
+```{r}
+
+m_mdl<-glm(TARGET_FLAG ~ 1, data= train1)
+full <- formula(lm(TARGET_FLAG~.,train1))
+
+model3 <-step(m_mdl, direction='forward', scope=full)
+
+summary(model3)
+
+
+
+coefficients(model3)
+predict3 <- predict(model3, type = 'response')
+pred_3<- ifelse(predict3>0.5,1,0)
+cm_model3 <- confusionMatrix(pred_3, train1$TARGET_FLAG, positive ="1")
+
+par_m31 <- data.frame((cm_model3$byClass))
+par_m32 <- data.frame((cm_model3$overall))
+names(par_m31)<- c("parameters_model3")
+names(par_m32)<- c("parameters_model3")
+par_m3<- rbind(par_m31, par_m32)
+
+kable(par_m3)
+
+AIC(model3)
+
+BIC(model3)
+
+
+
+rc_m3 <- roc(train$TARGET_FLAG~ predict3)
+auc(rc_m3)
+plot(rc_m3)
+```
+
+
+### Model 4
+```{r}
+train2 <- train[,c("TARGET_FLAG", "KIDSDRIV","MVR_PTS", "REVOKED", "CAR_USE_comm", "TIF")]
+
+model4 <- glm( TARGET_FLAG~.,family=binomial(link='logit'),data=train2)
+summary(model4)
+
+
+
+coefficients(model4)
+predict4 <- predict(model4, type = 'response')
+pred_4<- ifelse(predict4>0.5,1,0)
+cm_model4 <- confusionMatrix(pred_4, train1$TARGET_FLAG, positive ="1")
+
+par_m41 <- data.frame((cm_model4$byClass))
+par_m42 <- data.frame((cm_model4$overall))
+names(par_m41)<- c("parameters_model4")
+names(par_m42)<- c("parameters_model4")
+par_m4<- rbind(par_m41, par_m42)
+
+kable(par_m4)
+
+AIC(model4)
+BIC(model4)
+
+rc_m4 <- roc(train$TARGET_FLAG~ predict4)
+auc(rc_m4)
+plot(rc_m4)
+```
+
+
+
+
+```{r}
+comp <- cbind(round(par_m1,3),round(par_m2,3),round(par_m3,3),round(par_m4,3))
+comp
+
+
+aic_df <- data.frame(AIC(model1), AIC(model2), AIC(model3),AIC(model4))
+(aic_df)
+bic_df <- data.frame(BIC(model1), BIC(model2), BIC(model3), BIC(model4))
+
+(bic_df)
+```
+
+
+
+
+
+### Models for target amount
+
+#### Model1
+
+```{r}
+
+
+#### Test Model:
+
+
+
+test<- fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/Hw4/insurance-evaluation-data.csv")
+dim(test)
+
+
+table(test$PARENT1,useNA = 'ifany')
+table(test$MSTATUS, useNA = 'ifany')
+table(test$SEX, useNA = 'ifany')
+table(test$EDUCATION, useNA = 'ifany')
+table(test$JOB,useNA = 'ifany')
+table(test$CAR_TYPE,useNA = 'ifany')
+table(test$CAR_USE,useNA = 'ifany')
+table(test$RED_CAR,useNA = 'ifany')
+table(test$REVOKED,useNA = 'ifany')
+table(test$URBANICITY,useNA = 'ifany')
+
+
+
+test$INCOME <- as.numeric(gsub('[$,]', '', test$INCOME))
+test$HOME_VAL <- as.numeric(gsub('[$,]', '', test$HOME_VAL))
+test$BLUEBOOK <- as.numeric(gsub('[$,]', '', test$BLUEBOOK))
+test$OLDCLAIM <- as.numeric(gsub('[$,]', '', test$OLDCLAIM))
+
+
+miss <- data.frame(map_df(test, function(x) sum(is.na(x))))
+miss <- miss[!(rowSums(miss) == 0), !(colSums(miss) == 0)]
+miss
+
+
+
+test$AGE[is.na(test$AGE)] <- median(test$AGE, na.rm = TRUE)
+test$YOJ[is.na(test$YOJ)] <- median(test$YOJ, na.rm = TRUE)
+test$INCOME[is.na(test$INCOME)] <- median(test$INCOME, na.rm = TRUE)
+test$HOME_VAL[is.na(test$HOME_VAL)] <- median(test$HOME_VAL, na.rm = TRUE)
+test$CAR_AGE[is.na(test$CAR_AGE)] <- median(test$CAR_AGE, na.rm = TRUE)
+
+
+
+
+replace_outliers <- function(x) {
+qnt <- quantile(x, probs=c(.25, .75), na.rm = T)
+caps <- quantile(x, probs=c(.05, .95), na.rm = T)
+H <- 1.5 * IQR(x, na.rm = T)
+x[x < (qnt[1] - H)] <- caps[1]
+x[x > (qnt[2] + H)] <- caps[2]
+ 
+return(x)
+}
+
+test$BLUEBOOK<-replace_outliers(test$BLUEBOOK)
+test$OLDCLAIM<-replace_outliers(test$OLDCLAIM)
+test$INCOME<-replace_outliers(test$INCOME)
+
+
+
+test$AGE[is.na(test$AGE)] <- median(test$AGE, na.rm = TRUE)
+test$YOJ[is.na(test$YOJ)] <- median(test$YOJ, na.rm = TRUE)
+test$INCOME[is.na(test$INCOME)] <- median(test$INCOME, na.rm = TRUE)
+test$HOME_VAL[is.na(test$HOME_VAL)] <- median(test$HOME_VAL, na.rm = TRUE)
+test$CAR_AGE[is.na(test$CAR_AGE)] <- median(test$CAR_AGE, na.rm = TRUE)
+
+
+
+
+
+test$PARENT1<- ifelse(test$PARENT1=="Yes",1,0)
+
+test$MSTATUS<- ifelse(test$MSTATUS=="Yes",1,0)
+
+test$SEX_m<- ifelse(test$SEX=="M",1,0)
+test$SEX_f<- ifelse(test$SEX=="z_F",1,0)
+test <- test[,-c("SEX")]
+
+test$EDU_lesshs<- ifelse(test$EDUCATION=="<High School",1,0)
+test$EDU_hs<- ifelse(test$EDUCATION=="z_High School",1,0)
+test$EDU_bach<- ifelse(test$EDUCATION=="Bachelors",1,0)
+test$EDU_ms<- ifelse(test$EDUCATION=="Masters",1,0)
+test$EDU_phd<- ifelse(test$EDUCATION=="PhD",1,0)
+
+test <- test[,-c("EDUCATION")]
+
+test$JOB_dl<- ifelse(test$JOB=="Doctor"|test$JOB=="Lawyer",1,0)
+test$JOB_prof<- ifelse(test$JOB=="Clerical"|test$JOB=="Manager"|test$JOB=="Professional",1,0)
+test$JOB_bc<- ifelse(test$JOB=="z_Blue Collar",1,0)
+test$JOB_st<- ifelse(test$JOB=="Student",1,0)
+test$JOB_hm<- ifelse(test$JOB=="Home Maker",1,0)
+test$JOB_nj<- ifelse(test$JOB==""|test$JOB == " ",1,0)
+
+test <- test[,-c("JOB")]
+
+
+
+test$CAR_USE_comm <- ifelse(test$CAR_USE=="Commercial",1,0)
+test$CAR_USE_pvt<- ifelse(test$CAR_USE=="Private",1,0)
+test <- test[,-c("CAR_USE")]
+
+test$CAR_TYPE_suv <- ifelse(test$CAR_TYPE=="z_SUV",1,0)
+test$CAR_TYPE_mvv <- ifelse(test$CAR_TYPE=="Minivan"|test$CAR_TYPE=="Van",1,0)
+test$CAR_TYPE_sc <- ifelse(test$CAR_TYPE=="Sports Car",1,0)
+test$CAR_TYPE_pt <- ifelse(test$CAR_TYPE=="Panel Truck",1,0)
+test$CAR_TYPE_pu <- ifelse(test$CAR_TYPE=="Pickup",1,0)
+test <- test[,-c("CAR_TYPE")]
+
+test$RED_CAR<- ifelse(test$RED_CAR=="yes",1,0)
+
+
+
+
+test$REVOKED<- ifelse(test$REVOKED=="Yes",1,0)
+
+
+test$URBANICITY<- ifelse(test$URBANICITY=="Highly Urban/ Urban",1,0)
+
+test1<- test[,-c("SEX_f", "EDU_phd", "CAR_USE_pvt", "JOB_nj","CAR_TYPE_pu")]
+
+
+pred_df<-predict(model2,type="response", newdata=test1)
+pred_df <- ifelse(pred_df > 0.5, 1, 0)
+```
+
+
+```{r}
+train_ta<- train[train$TARGET_FLAG==1,-c(1)]
+model11 <- lm(TARGET_AMT~.,data=train_ta)
+summary(model11)
+
+
+library(leaps)
+best.subset <- regsubsets(TARGET_AMT~., train_ta,nvmax=5)
+best.subset.summary <- summary(best.subset)
+best.subset.summary$outmat
+
+best.subset.by.adjr2 <- which.max(best.subset.summary$adjr2)
+best.subset.by.adjr2
+
+##http://jadianes.me/best-subset-model-selection-with-R
+
+
+train_ta1 <- train_ta[,c("TARGET_AMT" ,"BLUEBOOK","REVOKED", "MVR_PTS","CAR_AGE", "SEX_f")]
+model11 <- lm(TARGET_AMT~.,data=train_ta1)
+summary(model11)
+AIC(model11)
+arsq_m11 <-summary(model11)$adj.r.squared
+BIC(model11)
+logLik(model11)
+
+
+
+
+model22<- lm(TARGET_AMT~.,data=train_ta)
+model22 <-step(model22, direction="backward")
+summary(model22)
+
+arsq_m22 <-summary(model22)$adj.r.squared
+AIC(model22)
+BIC(model22)
+logLik(model22)
+
+
+
+
+
+m_mdl<-glm(TARGET_AMT ~ 1, data= train_ta)
+full <- formula(lm(TARGET_AMT~.,train_ta))
+
+model33 <-step(m_mdl, direction='forward', scope=full)
+
+summary(model33)
+arsq_m33 <-summary(model33)$adj.r.squared
+AIC(model33)
+BIC(model33)
+logLik(model33)
+
+
+
+
+aic_df <- data.frame(AIC(model11), AIC(model22), AIC(model33))
+(aic_df)
+bic_df <- data.frame(BIC(model11), BIC(model22), BIC(model33))
+
+(bic_df)
+
+
+
+```
+
